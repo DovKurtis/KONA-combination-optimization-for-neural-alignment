@@ -1,6 +1,6 @@
-from kona.sim_core import generate_X_n_list
-from scripts.kona.drift_presets import HARD_COMBO #<——any preset
-from scripts.kona.align_X_n_list_and_evaluate import run_one_line, run_alignment_pipeline_kfold
+from .sim_core import generate_X_n_list
+from .drift_presets import HARD_COMBO
+from .align_X_n_list_and_evaluate import run_one_line, run_alignment_pipeline_kfold
 
 X_n_list = generate_X_n_list(HARD_COMBO)
 
