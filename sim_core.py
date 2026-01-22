@@ -4,7 +4,9 @@
 #  mixes latents into channels, injects observation noise, 
 # and returns the final (days, trials, time, channels) tensor 
 #-------------GENERATES X_n_list -------------
-
+import sys
+print("SIM_CORE LOADED FROM:", __file__, "argv0:", sys.argv[0])
+from scipy.linalg import expm
 import numpy as np
 
 def smooth_ar1(T, rng, rho=0.98, scale=1.0):
@@ -18,11 +20,11 @@ def smooth_ar1(T, rng, rho=0.98, scale=1.0):
 def make_latent_trials(n_trials, T, d_latent, rng):
     Z_trials = np.zeros((n_trials, T, d_latent))
     for tr in range(n_trials):
-        onset = int(rng.integers(40, 180))
-        dur   = int(rng.integers(140, 320))
-        end   = min(T, onset + dur)
-        s = np.linspace(0, 1, end - onset)
-
+        onset_hi = max(1, min(180, T-1))
+        onset = int(rng.integers(0, onset_hi))  # or keep a min like 40 if T allows
+        dur = int(rng.integers(1, min(320, T - onset) + 1))  # ensures end-onset >= 1
+        end = onset + dur
+        s = np.linspace(0, 1, end - onset, endpoint=False)
         base = np.stack([
             np.sin(2*np.pi*(3+2*rng.random())*s + 2*np.pi*rng.random()),
             np.cos(2*np.pi*(2+2*rng.random())*s + 2*np.pi*rng.random()),
@@ -45,12 +47,9 @@ def colored_obs_noise(T, n_ch, rng, rho=0.97, scale=0.05, cm_rho=0.995, cm_scale
     return x + cm
 
 def random_rotation_scaled(d, rng, scale):
-    # near-identity orthogonal rotation (scale controls magnitude)
     A = rng.standard_normal((d, d))
-    S = A - A.T
-    Q, _ = np.linalg.qr(np.eye(d) + scale * S)
-    if np.linalg.det(Q) < 0:
-        Q[:, 0] *= -1
+    S = A - A.T                      # skew-symmetric
+    Q = expm(scale * S)              # true rotation, angle ∝ scale
     return Q
 
 def random_shear_scaled(d, rng, scale):
@@ -65,10 +64,13 @@ def make_day_transforms(cfg, rng):
     for _ in range(cfg.n_days - 1):
         R_list.append(random_rotation_scaled(cfg.d_latent, rng, cfg.rot_scale) if cfg.rot_scale > 0 else np.eye(cfg.d_latent))
         S_list.append(random_shear_scaled(cfg.d_latent, rng, cfg.shear_scale) if cfg.shear_scale > 0 else np.eye(cfg.d_latent))
-
-    # lags
     if cfg.lag_max > 0:
-        lag_list = [0] + [int(rng.integers(-cfg.lag_max, cfg.lag_max + 1)) for _ in range(cfg.n_days - 1)]
+        lag_list = [0]
+        for _ in range(cfg.n_days - 1):
+            l = 0
+            while l == 0:
+                l = int(rng.integers(-cfg.lag_max, cfg.lag_max + 1))
+            lag_list.append(l)
     else:
         lag_list = [0] * cfg.n_days
 
@@ -97,10 +99,12 @@ def apply_dropout(W, dropout_p, rng):
     W2[:, drop_idx] = 0.0
     return W2
 
+
 def generate_X_n_list(cfg):
     rng = np.random.default_rng(cfg.seed)
     Z_trials = make_latent_trials(cfg.n_trials, cfg.T, cfg.d_latent, rng)
 
+    R_list, S_list, lag_list = make_day_transforms(cfg, rng)
     R_list, S_list, lag_list = make_day_transforms(cfg, rng)
     W_list = make_W_per_day(cfg, rng)
 
@@ -126,4 +130,4 @@ def generate_X_n_list(cfg):
 
         X_days.append(X_day)
 
-    return np.array(X_days)  # (n_days, n_trials, T, n_ch)
+    return np.array(X_days, dtype=np.float32)  # (n_days, n_trials, T, n_ch)
