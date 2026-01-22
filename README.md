@@ -1,144 +1,60 @@
-OVERVIEW
---------
+python -m scripts.kona.__main__
 
-This repository simulates multi-day neural recordings with controlled drift and evaluates alignment methods that recover a shared latent structure across days.
+# Simulation-based diagnostic probe for neural drift sources using alignment behavior
 
-The pipeline has three layers:
-(1) drift presets,
-(2) data generation,
-(3) alignment + evaluation.
+This repo is a small testbed for diagnosing **which drift sources are distinguishable** from **alignment behavior alone**.
 
-A thin run script (“cockpit”) wires these components together.
+## Problem
 
+In long-term neural recording / BCI settings, decoding degrades over days due to drift (electrode shift, neural reorganization, timing shifts, channel mixing, dropout, etc.). A practical question is: **from the way different alignment methods help or fail, can we infer what kind of drift is present?**
 
-drift_presets.py
-----------------
+This project tests that question in a controlled simulation.
 
-drift_presets.py defines the SimConfig object, which specifies dataset shape, noise magnitudes, and which drift mechanisms are active.
+## What this is
 
-Non-preset parameters that define dataset shape and noise:
+A fully self-contained pipeline:
 
-    n_days        : number of recording days
-    n_trials      : trials per day
-    T             : timepoints per trial
-    d_latent      : latent dimensionality
-    n_ch          : number of channels
-    seed          : RNG seed
+1) **Simulate** multi-day neural-like data with controllable drift parameters  
+2) Project each day into a shared latent space (day-0 PCA)  
+3) Compute per-day alignment error under several alignment strategies:
+- raw (no correction)
+- lag (time shift)
+- proc (orthogonal Procrustes)
+- lag+proc
+- ridge_direct (linear map fit on trials)
 
-Noise parameters:
+4) Convert those per-day errors into a compact **feature vector**  
+5) Train a simple **drift-type classifier** to predict the dominant drift source:
+`rotation | shear | lag | mix | dropout`
 
-    obs_rho       : temporal correlation of per-channel noise
-    obs_scale     : scale of per-channel noise
-    cm_rho        : temporal correlation of common-mode noise
-    cm_scale      : scale of common-mode noise
+The output is cross-validated accuracy + confusion matrices, and an ablation comparing features **with vs without extra diagnostics**.
 
-Preset parameters define the type of drift applied to the data:
+## What this is not
 
-    PURE_ROTATION        : latent rotation only
-    ROTATION_PLUS_LAG    : latent rotation + temporal lag
-    SHEAR_ONLY           : non-orthogonal latent shear
-    MIXING_DRIFT         : slow drift in channel mixing
-    CHANNEL_DROPOUT      : channel loss
-    HARD_COMBO           : rotation + shear + lag + mixing drift + dropout
+- Not a decoder for real neural data
+- Not a claim that these simulated drift classes correspond cleanly to biology
+- Not production-ready; this is a **diagnostic probe / sanity testbed**
+- Not a method that “solves drift”; it is designed to expose which cases are intrinsically ambiguous given coarse alignment-only metrics
 
-Changing the experiment means selecting or modifying one preset.
+## Reproducible run
 
+From the repo root:
 
-sim_core.py
------------
+```bash
+source ./.venv/bin/activate
+python -m scripts.kona.__main__
 
-sim_core.py generates the synthetic neural data.
-
-It consumes a SimConfig and outputs:
-
-    X_n_list
-    shape: (cfg.n_days, cfg.n_trials, cfg.T, cfg.n_ch)
-
-Generation proceeds as follows:
-
-(1) Generate a single shared latent tensor:
-
-        Z_trials
-        shape: (trials, time, d_latent)
-
-(2) Sample per-day latent transforms and per-day mixing matrices:
-
-        R_list, S_list, lag_list
-        W_list
-
-(3) For each day:
-    - apply temporal lag via np.roll on the time axis
-    - apply latent drift via:
-            Zt @ (S @ R)
-    - mix latents into channels via:
-            @ Wd
-    - add colored observation noise
-
-The output is a realistic multi-day neural recording tensor with known ground-truth structure.
+Cross-validated drift-type classification accuracy using alignment-behavior features. 
+“Diagnostics OFF” uses only per-day alignment errors (raw/lag/proc/lag+proc/ridge). 
+“Diagnostics ON” additionally includes lag magnitude, Procrustes train residual, 
+    ridge-map norm, ridge train-fit error, and ridge gain over raw, which are intended to 
+    disambiguate alignment failure modes.
 
 
-align_X_n_list_and_evaluate.py
-------------------------------
+Diagnostics OFF:
+mean_acc: [0.645]
+std_acc: [0.07648529270389177]
 
-align_X_n_list_and_evaluate.py consumes X_n_list and evaluates alignment quality.
-
-It first fixes a single preprocessing pipeline using day 0 only:
-
-    w0   : channel weights
-    sc0  : StandardScaler
-    pca0 : PCA
-
-That same day-0 pipeline is then used to convert every day’s raw channels into latent trajectories:
-
-    Z_day
-    shape: (trials, time, k)
-
-
-run_alignment_pipeline_kfold
-----------------------------
-
-For each day > 0, this function runs K-fold cross-validation over trials and, per fold, computes:
-
-(1) raw error between day and day-0 mean latent trajectories
-(2) best temporal lag chosen by brute-force Frobenius minimization
-(3) Procrustes rotation R fit on lag-aligned TRAIN means
-(4) residual ridge map W_res fit on lag-aligned, rotated TRAIN trials
-    to predict (day0 − day) residuals
-
-R and W_res are applied to TEST data, and the final Frobenius error is reported.
-
-
-sweep_k_lambda_fast
--------------------
-
-This is a fast hyperparameter search.
-
-It loops over latent dimension k and ridge regularization lambda_,
-rebuilds the day-0 scaler and PCA for each k,
-fits a ridge map on TRAIN trials,
-scores on TEST means,
-and returns the best (k, lambda_).
-
-
-run_one_line
-------------
-
-run_one_line is a convenience wrapper.
-
-It calls sweep_k_lambda_fast to select k and lambda_,
-then runs run_alignment_pipeline_kfold using those values.
-
-It should not execute automatically at import time.
-
-
-cockpit / run script
---------------------
-
-The run script contains no scientific logic.
-
-It:
-    - selects a preset from drift_presets.py
-    - calls generate_X_n_list(preset) to produce X_n_list
-    - calls run_one_line(X_n_list) or run_alignment_pipeline_kfold(X_n_list, ...)
-
-This file is the only place where experiments are launched.
+Diagnostics ON: 
+mean_acc: [0.655]
+std_acc: [0.07314369419163894]
