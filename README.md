@@ -1,20 +1,32 @@
 # KONA-combination-optimization-for-neural-alignment
 BCI-data Python library for comparing online and offline alignment methods across session chunks or day-split datasets 
+# Neural Drift Sandbox
 
-This project simulates drifting trial-related neural signals, trains a ridge decoder, and evaluates simple alignment methods (`mean`, `scale`, `moment`, `meanstatic`) under drift.
+Simulation and evaluation framework for studying neural decoder drift and simple alignment methods.
 
-It supports:
-- full-session evaluation
-- day-chunked evaluation
-- trial-level drift vs capture plots
-- window sweeps for online correction methods
+## What this does
+- Simulates trial-based neural signals with structured drift
+- Trains a ridge decoder
+- Tests online alignment methods (`mean`, `scale`, `moment`)
+- Computes trial drift vs decoder capture metrics
+- Supports full-session and day-chunked evaluation
 
-Main entry points:
-- `make_one_dataset(...)`
-- `make_day_dataset(...)`
-- `eval_drift(...)`
-- `eval_dataset(...)`
+## Main functions
 
-Example:
+make_one_dataset()  
+→ generate a full synthetic session
+
+make_day_dataset()  
+→ split a long session into day chunks
+
+eval_drift(data)  
+→ evaluate alignment methods on a single session
+
+eval_dataset(days_ds)  
+→ run drift evaluation across multiple days
+
+## Example
+
+```python
 days_ds = make_day_dataset(seed=0, samples_per_day=800)
-results = eval_dataset(days_ds, lambda_ridge=1.0, window_sizes=[20, 50, 100, 200])
+results = eval_dataset(days_ds, lambda_ridge=1.0, window_sizes=[20,50,100,200])
